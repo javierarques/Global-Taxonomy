@@ -14,6 +14,9 @@ class Global_Taxonomy
 	var $plugin_url;
 	var $slug = "global-tag";
 	var $taxonomy = 'global-taxonomy';
+	var $admin_setting_url;
+	
+
 	
 	/**
 	 * Contructor, set variables and hooks
@@ -21,7 +24,12 @@ class Global_Taxonomy
 	 */
 	public function __construct(){
 	
-		
+		// Set Admin URL
+		if ( ! is_multisite() ){
+			$this->admin_setting_url = admin_url('admin.php?page=global-taxonomy');
+		} else {
+			$this->admin_setting_url = network_admin_url('settings.php?page=global-taxonomy');		
+		}
 		// Set Plugin Path
 		$this->plugin_path = dirname(__FILE__);
 	
@@ -270,6 +278,8 @@ class Global_Taxonomy
 				$gt_slug = get_site_option(  'gt_slug' );
 				$gt_sites = get_site_option( 'gt_sites' );
 				
+				//$this->dump($gt_sites);
+				
 				if ( ! empty( $_GET['settings-updated'])) {
 					echo '<div class="updated settings-error" id="setting-error-settings_updated"><p><strong>' . __('Settings saved', 'gt') .'</strong></p></div>';
 				}
@@ -312,7 +322,19 @@ class Global_Taxonomy
 			        
 			        ?>
 			    </table>
+			    
+			  <h3><?php _e('Propagate changes', 'gt')?></h3>
+			  <p><?php _e('Check this option and the plugin will check that all the taxonomy terms are created in all blogs', 'gt')?></p>
+			  
+				<table class="form-table">
+					<tr valign="top">
+						<th scope="row"><label for="gt_propagate"><?php _e('Propagate changes', 'gt')?></label></th> 
+						<td><input type="checkbox" value="1" name="gt_propagate" id="gt_propagate" /><br></td>
+					</tr>
+				</table>
+			  
 			    <?php wp_nonce_field();?>
+			    
 			    <p class="submit">
 			    	<input type="submit" class="button-primary" value="<?php _e('Save Changes', 'gt') ?>" />
 			    </p>
@@ -331,10 +353,11 @@ class Global_Taxonomy
 	 *
 	 */
 	function save_settings () {
-	
+			
 		if ( ! empty( $_POST ) && ! empty($_GET['page']) && $_GET['page'] == 'global-taxonomy') {
-
-			extract( $_POST );
+		
+			//$this->dump( $_POST ); 
+			extract($_POST);
 			
 			if ( isset( $gt_slug)) {
 				$gt_slug = sanitize_title( $gt_slug );
@@ -343,14 +366,114 @@ class Global_Taxonomy
 			
 			if ( isset( $gt_sites)) {
 				update_site_option( 'gt_sites', $gt_sites);
+			} else {
+				update_site_option( 'gt_sites', 0);
+			}
+			
+			if ( ! empty( $gt_propagate )) {
+				$this->propagate_changes();
 			}
 			
 			flush_rewrite_rules();
-			wp_redirect( add_query_arg( 'settings-updated', 'true',  site_url() . $_POST['_wp_http_referer']) );
+			wp_redirect( add_query_arg( 'settings-updated', 'true',  $this->admin_setting_url ) );
 		
 
 		}
 	}
+	/**
+	 * Checks that all main blog terms are created site wide
+	 *
+	 */
+	function propagate_changes () {
+	
+		global $already_inserted;
+		$already_inserted = array();
+		$sites = $this->get_sites();
+	
+		$all_terms = get_terms( $this->taxonomy, array('hide_empty' => false));
+		
+		
+		foreach ( $all_terms as $current_term ) {
+		
+			foreach ( $sites as $site ) {
+				$this->wp_insert_term( $current_term, $site->blog_id );
+				//$this->wp_insert_term( $current_term, 3 );
+				
+				
+			}
+		}
+		
+		/*
+		foreach ( $all_terms as $current_term ) {
+			foreach ( $sites as $site ) {
+				$this->wp_insert_term( $current_term, $site->blog_id );
+			}
+		}
+		*/
+	
+	}
+	
+	function wp_insert_term ( $term, $blog_id) {
+	
+		
+		
+		error_reporting(E_ALL);
+		ini_set('display_errors', '1');
+		
+		global $already_inserted;
+		
+		// Check if we have already inserted this term due to recursivity
+		/*
+		if ( in_array( $term->term_id, $already_inserted)) {
+			return true;
+		}
+		*/
+		
+		
+		
+		$parent_term = false;
+		$parent_term_ms_id = 0;
+		$args = array('name' => $term->name, 'description' => $term->description, 'parent' => 0, 'slug' => $term->slug );		
+		
+		if ( $term->parent != 0) {
+			$parent_term = get_term( $term->parent, $this->taxonomy );
+		}
+		
+
+		
+		switch_to_blog( $blog_id );
+		
+
+		
+		if ( $parent_term) {
+			$parent_term_ms = get_term_by( 'name', $parent_term->name, $this->taxonomy );
+			
+
+		
+		
+			if ( ! $parent_term_ms ) {
+				$parent_term_ms_id = $this->wp_insert_term( $parent_term, $blog_id );
+			} else {
+				$parent_term_ms_id = $parent_term_ms->term_id;
+			}
+			$args['parent'] = $parent_term_ms_id;
+		}
+		
+		$term_ms = get_term_by( 'name', $term->name, $this->taxonomy);
+		if ( $term_ms ) {
+			$return = wp_update_term( $term_ms->term_id, $this->taxonomy, $args);
+		} else {
+			$return = wp_insert_term( $term->name, $this->taxonomy, $args );
+		}
+		
+		restore_current_blog();				
+		
+		//array_push( $already_inserted, $term->term_id );	
+		
+		return $return['term_id'];
+	
+	}
+	
 	function get_sites () {
 		global $wpdb;
 		return $wpdb->get_results("SELECT * FROM $wpdb->blogs where blog_id > 1");
