@@ -433,7 +433,7 @@ class Global_Taxonomy
 		
 		$parent_term = false;
 		$parent_term_ms_id = 0;
-		$args = array('name' => $term->name, 'description' => $term->description, 'parent' => 0, 'slug' => $term->slug );		
+		$args = array('name' => $term->name, 'description' => $term->description, 'parent' => 0);		
 		
 		if ( $term->parent != 0) {
 			$parent_term = get_term( $term->parent, $this->taxonomy );
